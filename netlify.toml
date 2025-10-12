@@ -1,0 +1,11 @@
+[build]
+  command = "cd construction-project-agent && npm run build"
+  publish = "construction-project-agent/.next"
+
+[build.environment]
+  NODE_VERSION = "18"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

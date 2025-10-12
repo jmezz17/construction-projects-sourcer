@@ -1,15 +1,33 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-interface Project {
+interface Rfp {
+  id: number;
+  title: string;
+  description: string;
+  source_url: string;
+  source_type: string | null;
+  publish_date: string | null;
+  deadline: string | null;
+  estimated_budget: number | null;
+  industry: string | null;
+  location: string | null;
+  tags: string[] | null;
+  profitability_score: number | null;
+  skillset_match_score: number | null;
+}
+
+interface ProjectRow {
+  id: number;
   rank: number;
   name: string;
   location: string;
   customer: string;
   expectedGrossProfit: string;
-  fitScore: number;
+  rawBudget: number | null;
+  fitScore: number | null;
   source: string;
   link: string;
 }
@@ -18,90 +36,8 @@ export default function ResultsPage() {
   const router = useRouter();
   const [contractorName, setContractorName] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-
-  // Mock data for demonstration
-  const projects: Project[] = [
-    {
-      rank: 1,
-      name: 'Downtown Mixed-Use Development',
-      location: 'San Francisco, CA',
-      customer: 'Bay Area Properties LLC',
-      expectedGrossProfit: '$2.4M',
-      fitScore: 9,
-      source: 'Dodge Construction Network',
-      link: 'https://construction.com/project/12345'
-    },
-    {
-      rank: 2,
-      name: 'Tech Campus Expansion Phase 2',
-      location: 'San Jose, CA',
-      customer: 'Silicon Valley Tech Corp',
-      expectedGrossProfit: '$1.8M',
-      fitScore: 9,
-      source: 'BidClerk',
-      link: 'https://bidclerk.com/project/67890'
-    },
-    {
-      rank: 3,
-      name: 'Public Library Renovation',
-      location: 'Oakland, CA',
-      customer: 'City of Oakland',
-      expectedGrossProfit: '$1.2M',
-      fitScore: 8,
-      source: 'PlanHub',
-      link: 'https://planhub.com/project/24680'
-    },
-    {
-      rank: 4,
-      name: 'Medical Office Building',
-      location: 'Sacramento, CA',
-      customer: 'Healthcare Realty Partners',
-      expectedGrossProfit: '$950K',
-      fitScore: 8,
-      source: 'ConstructConnect',
-      link: 'https://constructconnect.com/project/13579'
-    },
-    {
-      rank: 5,
-      name: 'Warehouse Distribution Center',
-      location: 'Stockton, CA',
-      customer: 'Logistics Solutions Inc',
-      expectedGrossProfit: '$780K',
-      fitScore: 7,
-      source: 'BuildingConnected',
-      link: 'https://buildingconnected.com/project/97531'
-    },
-    {
-      rank: 6,
-      name: 'Hotel Modernization',
-      location: 'Napa, CA',
-      customer: 'Hospitality Group West',
-      expectedGrossProfit: '$680K',
-      fitScore: 7,
-      source: 'Dodge Construction Network',
-      link: 'https://construction.com/project/86420'
-    },
-    {
-      rank: 7,
-      name: 'Elementary School Addition',
-      location: 'Fremont, CA',
-      customer: 'Fremont Unified School District',
-      expectedGrossProfit: '$520K',
-      fitScore: 6,
-      source: 'PlanHub',
-      link: 'https://planhub.com/project/11223'
-    },
-    {
-      rank: 8,
-      name: 'Retail Shopping Center Facade',
-      location: 'Walnut Creek, CA',
-      customer: 'Retail Development Partners',
-      expectedGrossProfit: '$420K',
-      fitScore: 6,
-      source: 'BidClerk',
-      link: 'https://bidclerk.com/project/44556'
-    }
-  ];
+  const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // Retrieve contractor info from sessionStorage
@@ -112,10 +48,59 @@ export default function ResultsPage() {
     }
     setContractorName(name);
 
-    // Simulate loading delay
-    setTimeout(() => {
-      setIsLoading(false);
-    }, 1500);
+    const fetchProjects = async () => {
+      try {
+        const response = await fetch(
+          'https://construction-projects-sourcer-api.onrender.com/api/rfps/'
+        );
+
+        if (!response.ok) {
+          throw new Error(`Request failed with status ${response.status}`);
+        }
+
+        const data: Rfp[] = await response.json();
+
+        setProjects(
+          data.map((rfp, index) => {
+            const formattedBudget =
+              typeof rfp.estimated_budget === 'number'
+                ? `$${rfp.estimated_budget.toLocaleString('en-US')}`
+                : 'N/A';
+
+            const fitScore =
+              rfp.profitability_score ?? rfp.skillset_match_score ?? null;
+
+            let sourceLabel = rfp.source_type ?? '';
+            try {
+              const url = new URL(rfp.source_url);
+              sourceLabel = url.hostname;
+            } catch {
+              // Ignore URL parsing errors and fall back to source_type
+            }
+
+            return {
+              id: rfp.id,
+              rank: index + 1,
+              name: rfp.title,
+              location: rfp.location ?? '—',
+              customer: rfp.industry ?? 'General',
+              expectedGrossProfit: formattedBudget,
+              rawBudget: rfp.estimated_budget,
+              fitScore,
+              source: sourceLabel || '—',
+              link: rfp.source_url,
+            } satisfies ProjectRow;
+          })
+        );
+      } catch (error) {
+        console.error(error);
+        setError('Failed to load construction projects. Please try again later.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchProjects();
   }, [router]);
 
   const getFitScoreColor = (score: number) => {
@@ -127,6 +112,35 @@ export default function ResultsPage() {
   const handleNewSearch = () => {
     router.push('/');
   };
+
+  const stats = useMemo(() => {
+    const totalValue = projects.reduce((sum, project) => {
+      if (typeof project.rawBudget === 'number') {
+        return sum + project.rawBudget;
+      }
+      return sum;
+    }, 0);
+
+    const fitScores = projects
+      .map((project) => project.fitScore)
+      .filter((value): value is number => value !== null);
+
+    const averageFit =
+      fitScores.length > 0
+        ? Number((fitScores.reduce((sum, score) => sum + score, 0) / fitScores.length).toFixed(1))
+        : null;
+
+    return {
+      totalValue,
+      averageFit,
+    };
+  }, [projects]);
+
+  const totalValueLabel =
+    stats.totalValue > 0 ? `$${stats.totalValue.toLocaleString('en-US')}` : '—';
+
+  const averageFitLabel =
+    stats.averageFit !== null ? `${stats.averageFit}/10` : 'N/A';
 
   if (isLoading) {
     return (
@@ -176,6 +190,9 @@ export default function ResultsPage() {
           <p className="text-gray-400">
             {projects.length} construction projects ranked by gross profit potential and company fit
           </p>
+          {error && (
+            <p className="text-sm text-red-400 mt-2">{error}</p>
+          )}
         </div>
 
         {/* Projects Table */}
@@ -195,48 +212,60 @@ export default function ResultsPage() {
 
           {/* Table Body */}
           <div className="divide-y divide-[#2a2a2a]">
-            {projects.map((project) => (
-              <div
-                key={project.rank}
-                className="grid grid-cols-12 gap-4 px-6 py-4 hover:bg-[#2a2a2a]/50 transition-colors group"
-              >
-                <div className="col-span-1 flex items-center">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[#2a2a2a] text-[#ff6b00] font-semibold">
-                    {project.rank}
-                  </div>
-                </div>
-                <div className="col-span-2 flex items-center">
-                  <span className="text-white font-medium">{project.name}</span>
-                </div>
-                <div className="col-span-2 flex items-center">
-                  <span className="text-gray-300">{project.location}</span>
-                </div>
-                <div className="col-span-2 flex items-center">
-                  <span className="text-gray-300">{project.customer}</span>
-                </div>
-                <div className="col-span-2 flex items-center">
-                  <span className="text-white font-semibold">{project.expectedGrossProfit}</span>
-                </div>
-                <div className="col-span-1 flex items-center">
-                  <div className="flex items-center gap-1">
-                    <span className={`font-bold ${getFitScoreColor(project.fitScore)}`}>
-                      {project.fitScore}
-                    </span>
-                    <span className="text-gray-500">/10</span>
-                  </div>
-                </div>
-                <div className="col-span-2 flex items-center">
-                  <a
-                    href={project.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[#ff6b00] hover:text-[#ff8533] underline text-sm transition-colors"
-                  >
-                    {project.source}
-                  </a>
-                </div>
+            {projects.length === 0 ? (
+              <div className="px-6 py-6 text-center text-gray-400 text-sm">
+                No projects available yet.
               </div>
-            ))}
+            ) : (
+              projects.map((project) => (
+                <div
+                  key={project.id}
+                  className="grid grid-cols-12 gap-4 px-6 py-4 hover:bg-[#2a2a2a]/50 transition-colors group"
+                >
+                  <div className="col-span-1 flex items-center">
+                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[#2a2a2a] text-[#ff6b00] font-semibold">
+                      {project.rank}
+                    </div>
+                  </div>
+                  <div className="col-span-2 flex items-center">
+                    <span className="text-white font-medium">{project.name}</span>
+                  </div>
+                  <div className="col-span-2 flex items-center">
+                    <span className="text-gray-300">{project.location}</span>
+                  </div>
+                  <div className="col-span-2 flex items-center">
+                    <span className="text-gray-300">{project.customer}</span>
+                  </div>
+                  <div className="col-span-2 flex items-center">
+                    <span className="text-white font-semibold">{project.expectedGrossProfit}</span>
+                  </div>
+                  <div className="col-span-1 flex items-center">
+                    <div className="flex items-center gap-1">
+                      <span
+                        className={`font-bold ${
+                          project.fitScore !== null
+                            ? getFitScoreColor(project.fitScore)
+                            : 'text-gray-500'
+                        }`}
+                      >
+                        {project.fitScore !== null ? project.fitScore : 'N/A'}
+                      </span>
+                      {project.fitScore !== null && <span className="text-gray-500">/10</span>}
+                    </div>
+                  </div>
+                  <div className="col-span-2 flex items-center">
+                    <a
+                      href={project.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[#ff6b00] hover:text-[#ff8533] underline text-sm transition-colors"
+                    >
+                      {project.source}
+                    </a>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
@@ -248,11 +277,11 @@ export default function ResultsPage() {
           </div>
           <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-6">
             <div className="text-gray-400 text-sm mb-1">Total Potential Value</div>
-            <div className="text-3xl font-light text-white">$9.3M</div>
+            <div className="text-3xl font-light text-white">{totalValueLabel}</div>
           </div>
           <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-6">
             <div className="text-gray-400 text-sm mb-1">Average Fit Score</div>
-            <div className="text-3xl font-light text-green-400">7.5/10</div>
+            <div className="text-3xl font-light text-green-400">{averageFitLabel}</div>
           </div>
         </div>
       </main>
